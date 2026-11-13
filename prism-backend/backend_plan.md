@@ -179,7 +179,7 @@ prism-backend/
 │   │
 │   ├── routers/
 │   │   ├── __init__.py
-│   │   ├── auth.py              POST signup, verify-email, login, refresh, logout, forgot-password, reset-password, GET google, GET google/callback
+│   │   ├── auth.py              POST signup, verify-email, login, refresh, logout, forgot-password, reset-password, resend-verification, change-password; GET me, google, google/callback; PUT me
 │   │   ├── orgs.py              GET+PUT /v1/orgs/{org_id}
 │   │   ├── accounts.py          CRUD + test + sync-trigger + sync-logs for cloud accounts
 │   │   ├── costs.py             Cost aggregation queries (overall, by-service, by-day, by-tag, top-services, unit-economics)
@@ -1026,6 +1026,30 @@ All auth endpoints are unauthenticated (no JWT required). Apply auth rate limit 
 - Exchanges code → verifies id_token → JIT provision or link → issues tokens
 - Response: 302 redirect to `{FRONTEND_URL}/auth/callback?accessToken=...&refreshToken=...`
 - On error: 302 redirect to `{FRONTEND_URL}/login?error=oauth_failed`
+
+**GET /v1/auth/me** — authenticated (any role)
+- **Called by every frontend on app load / after login** to hydrate user context
+- Reads `current_user` from JWT. Fetches fresh data from DB.
+- Response: `{ id, email, name, avatar_url, org_id, org_name, role, email_verified, last_login }`
+- If user no longer exists in DB → 401 (account deleted)
+
+**PUT /v1/auth/me** — authenticated (any role)
+- Body: `{ name?, avatar_url? }`
+- Updates only the authenticated user's own profile
+- Response: updated `{ id, email, name, avatar_url }`
+
+**POST /v1/auth/change-password** — authenticated (any role)
+- Body: `{ current_password, new_password }`
+- Verifies `current_password` with `pwd_context.verify`. If wrong → 400 "Current password is incorrect".
+- Hashes `new_password` with bcrypt factor 12. Updates `users.password_hash`.
+- Does NOT revoke existing refresh tokens (user stays logged in on all devices).
+- Response: `{ message }`
+
+**POST /v1/auth/resend-verification** — no auth
+- Body: `{ email }`
+- Always return 200 (no enumeration).
+- If user exists and `email_verified = False`: generate new verification token, overwrite old one, send new email.
+- Edge case: if previous token not yet expired, still overwrite — prevents "token already valid" confusion.
 
 ---
 
@@ -1951,6 +1975,7 @@ boto3 AWS SES (primary). `send_email()` via `ses_client.send_email()`. SendGrid 
 | Email | Trigger | Recipients |
 |-------|---------|-----------|
 | Email verification | Signup | Signing-up user only |
+| Email re-verification | resend-verification | Requesting user only |
 | Password reset | forgot-password | Requesting user only |
 | Team invite | invite API | Invited email address |
 | Cap alert (75%) | Alert engine | `notification_settings.alert_emails` |
@@ -2235,7 +2260,7 @@ Follow this order. Each milestone produces a working, testable system. Never ski
 11. Implement `middleware/rate_limit.py` — slowapi limiter config.
 12. Implement `routers/auth.py` — full signup/verify/login/refresh/logout/forgot-reset flow.
 13. Implement `main.py` (without workers yet) + `server.py`.
-14. Test: signup → verify → login → refresh → logout.
+14. Test: signup → verify → login → GET /me (loads user context) → refresh → logout → resend-verification → change-password.
 
 ### Milestone 2 — Team + Org Settings (Days 6–8)
 15. Implement `routers/orgs.py` — GET + PUT org.
