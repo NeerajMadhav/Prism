@@ -51,7 +51,7 @@ export interface AwsConnectRequest {
   display_name: string;
   credentials: {
     role_arn: string;
-    external_id?: string;
+    external_id: string;
     region: string;
   };
   scope?: string;
@@ -76,7 +76,7 @@ export interface GcpConnectRequest {
     project_id: string;
     dataset_id: string;
     table_prefix: string;
-    service_account_json: string;
+    service_account_json: Record<string, unknown>;
   };
   scope?: string;
 }

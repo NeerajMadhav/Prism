@@ -574,7 +574,223 @@ async def google_callback(
         60,
         db=db,
     )
-    return RedirectResponse(f"{frontend}/auth/callback?code={exchange_code}")
+    return RedirectResponse(f"{frontend}/oauth-callback?code={exchange_code}")
+
+
+async def _verify_microsoft_id_token(id_token: str, client_id: str, tenant_id: str) -> dict:
+    """Verify Microsoft Entra ID token signature, audience, and issuer."""
+    # Use common JWKS; issuer is validated against tenant or multi-tenant pattern.
+    jwks_url = "https://login.microsoftonline.com/common/discovery/v2.0/keys"
+    async with httpx.AsyncClient(timeout=10.0) as client:
+        certs_res = await client.get(jwks_url)
+        certs_res.raise_for_status()
+        certs = certs_res.json()
+    header = jose_jwt.get_unverified_header(id_token)
+    kid = header.get("kid")
+    key_data = next((k for k in certs.get("keys", []) if k.get("kid") == kid), None)
+    if key_data is None:
+        raise ValueError("Unknown Microsoft signing key")
+    key = jwk.construct(key_data)
+    claims = jose_jwt.decode(
+        id_token,
+        key,
+        algorithms=["RS256"],
+        audience=client_id,
+        options={"verify_iss": False, "verify_at_hash": False},
+    )
+    iss = str(claims.get("iss", ""))
+    allowed_issuers = {
+        f"https://login.microsoftonline.com/{tenant_id}/v2.0",
+        f"https://sts.windows.net/{tenant_id}/",
+        "https://login.microsoftonline.com/common/v2.0",
+        "https://login.microsoftonline.com/organizations/v2.0",
+    }
+    if (
+        tenant_id not in ("common", "organizations", "consumers")
+        and iss not in allowed_issuers
+        and f"/{tenant_id}/" not in iss
+    ):
+        raise ValueError("Unexpected Microsoft token issuer")
+    email = claims.get("email") or claims.get("preferred_username")
+    if not email:
+        raise ValueError("Microsoft token missing email")
+    claims["email"] = str(email).lower()
+    claims["sub"] = str(claims.get("oid") or claims.get("sub"))
+    return claims
+
+
+async def _finish_oauth_login(
+    db: asyncpg.Connection,
+    *,
+    email: str,
+    name: str,
+    provider_user_id: str,
+    provider_column: str,
+    picture: str | None,
+    frontend: str,
+) -> RedirectResponse:
+    """Shared Google/Microsoft login-or-signup completion."""
+    if provider_column not in ("google_id", "microsoft_id"):
+        raise ValueError("unsupported oauth provider column")
+    user = await db.fetchrow(
+        f"SELECT * FROM users WHERE {provider_column} = $1",
+        provider_user_id,
+    )
+    if user is None:
+        user = await db.fetchrow("SELECT * FROM users WHERE email = $1", email)
+        if user is not None:
+            if not user["email_verified"]:
+                return RedirectResponse(f"{frontend}/login?error=email_unverified")
+            existing = user[provider_column]
+            if existing and existing != provider_user_id:
+                return RedirectResponse(f"{frontend}/login?error=oauth_failed")
+            await db.execute(
+                f"UPDATE users SET {provider_column} = $1, avatar_url = COALESCE($2, avatar_url) WHERE id = $3",
+                provider_user_id,
+                picture,
+                user["id"],
+            )
+
+    if user:
+        membership = await db.fetchrow(
+            """
+            SELECT org_id, role FROM team_members
+            WHERE user_id = $1 AND invite_accepted = TRUE
+            ORDER BY created_at ASC LIMIT 1
+            """,
+            user["id"],
+        )
+        if not membership:
+            return RedirectResponse(f"{frontend}/login?error=oauth_failed")
+        tokens = await _issue_tokens(
+            db, user["id"], membership["org_id"], membership["role"], email
+        )
+    else:
+        async with db.transaction():
+            user = await db.fetchrow(
+                f"""
+                INSERT INTO users (email, name, {provider_column}, avatar_url, email_verified)
+                VALUES ($1, $2, $3, $4, TRUE)
+                RETURNING id, email
+                """,
+                email,
+                name,
+                provider_user_id,
+                picture,
+            )
+            org = await db.fetchrow(
+                "INSERT INTO organizations (name) VALUES ($1) RETURNING id",
+                f"{name}'s Org",
+            )
+            await db.execute(
+                """
+                INSERT INTO team_members (org_id, user_id, role, invite_accepted)
+                VALUES ($1, $2, 'owner', TRUE)
+                """,
+                org["id"],
+                user["id"],
+            )
+            await db.execute(
+                "INSERT INTO notification_settings (org_id, alert_emails) VALUES ($1, $2)",
+                org["id"],
+                [email],
+            )
+        tokens = await _issue_tokens(db, user["id"], org["id"], "owner", email)
+
+    exchange_code = generate_token(24)
+    await kv_set(
+        f"oauth:code:{exchange_code}",
+        f"{tokens['access_token']}|{tokens['refresh_token']}",
+        60,
+        db=db,
+    )
+    return RedirectResponse(f"{frontend}/oauth-callback?code={exchange_code}")
+
+
+def _microsoft_redirect_uri() -> str:
+    settings = get_settings()
+    if settings.microsoft_redirect_uri:
+        return settings.microsoft_redirect_uri
+    if settings.google_redirect_uri:
+        return settings.google_redirect_uri.replace("/google/callback", "/microsoft/callback")
+    return "http://127.0.0.1:8000/v1/auth/microsoft/callback"
+
+
+@router.get("/microsoft")
+async def microsoft_login(db: asyncpg.Connection = Depends(get_db)) -> RedirectResponse:
+    settings = get_settings()
+    if not settings.microsoft_client_id:
+        raise AppError("Microsoft OAuth is not configured", status_code=500)
+    state = generate_token(16)
+    await kv_set(f"oauth:state:{state}", "1", 600, db=db)
+    tenant = settings.microsoft_tenant_id or "common"
+    redirect_uri = _microsoft_redirect_uri()
+    url = (
+        f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"
+        f"?client_id={settings.microsoft_client_id}"
+        f"&response_type=code"
+        f"&redirect_uri={redirect_uri}"
+        "&response_mode=query"
+        "&scope=openid%20email%20profile%20offline_access"
+        f"&state={state}"
+    )
+    return RedirectResponse(url)
+
+
+@router.get("/microsoft/callback")
+async def microsoft_callback(
+    code: str = Query(...),
+    state: str = Query(default=""),
+    db: asyncpg.Connection = Depends(get_db),
+) -> RedirectResponse:
+    settings = get_settings()
+    frontend = settings.frontend_url
+    if not settings.microsoft_client_id:
+        return RedirectResponse(f"{frontend}/login?error=oauth_failed")
+    if not state:
+        return RedirectResponse(f"{frontend}/login?error=oauth_state")
+    stored = await kv_pop(f"oauth:state:{state}", db=db)
+    if not stored:
+        return RedirectResponse(f"{frontend}/login?error=oauth_state")
+
+    tenant = settings.microsoft_tenant_id or "common"
+    redirect_uri = _microsoft_redirect_uri()
+    try:
+        async with httpx.AsyncClient(timeout=15.0) as client:
+            token_res = await client.post(
+                f"https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token",
+                data={
+                    "client_id": settings.microsoft_client_id,
+                    "client_secret": settings.microsoft_client_secret,
+                    "code": code,
+                    "redirect_uri": redirect_uri,
+                    "grant_type": "authorization_code",
+                },
+            )
+            token_res.raise_for_status()
+            id_token = token_res.json().get("id_token")
+            if not id_token:
+                raise ValueError("missing id_token")
+            claims = await _verify_microsoft_id_token(
+                id_token, settings.microsoft_client_id, tenant
+            )
+            email = str(claims["email"]).lower()
+            name = claims.get("name") or email
+            microsoft_id = str(claims["sub"])
+            picture = claims.get("picture")
+    except Exception:
+        logger.exception("microsoft_oauth_failed")
+        return RedirectResponse(f"{frontend}/login?error=oauth_failed")
+
+    return await _finish_oauth_login(
+        db,
+        email=email,
+        name=name,
+        provider_user_id=microsoft_id,
+        provider_column="microsoft_id",
+        picture=picture,
+        frontend=frontend,
+    )
 
 
 @router.post("/oauth/exchange", response_model=TokenResponse)

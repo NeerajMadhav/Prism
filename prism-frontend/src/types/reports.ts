@@ -20,3 +20,12 @@ export interface SendReportNowResponse {
   message: string;
   task_id: string;
 }
+
+export interface ReportPreview {
+  month: string;
+  month_label: string;
+  org_name: string;
+  total_usd: number;
+  html: string;
+  text: string;
+}

@@ -22,6 +22,7 @@ CREATE TABLE IF NOT EXISTS users (
   name TEXT NOT NULL,
   password_hash TEXT,
   google_id TEXT UNIQUE,
+  microsoft_id TEXT UNIQUE,
   avatar_url TEXT,
   email_verified BOOLEAN NOT NULL DEFAULT FALSE,
   email_verify_token TEXT,
@@ -406,3 +407,14 @@ CREATE TABLE IF NOT EXISTS api_keys (
   created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   revoked_at TIMESTAMPTZ
 );
+
+-- Idempotent upgrades for existing databases
+ALTER TABLE users ADD COLUMN IF NOT EXISTS microsoft_id TEXT;
+DO $$
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'users_microsoft_id_key'
+  ) THEN
+    ALTER TABLE users ADD CONSTRAINT users_microsoft_id_key UNIQUE (microsoft_id);
+  END IF;
+END $$;

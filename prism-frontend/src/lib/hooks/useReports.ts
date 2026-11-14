@@ -38,3 +38,30 @@ export function useSendReportNow(orgId: string) {
     onError: (error) => handleApiError(error),
   });
 }
+
+export function useReportPreview(orgId: string, enabled = true) {
+  return useQuery({
+    queryKey: [...queryKeys.reports(orgId), 'preview'],
+    queryFn: () => reportsApi.preview(orgId),
+    enabled: Boolean(orgId) && enabled,
+    staleTime: STALE_TIMES.settings,
+  });
+}
+
+export function useDownloadReportPdf(orgId: string) {
+  return useMutation({
+    mutationFn: async () => {
+      const blob = await reportsApi.downloadPdf(orgId);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `prism-report-${new Date().toISOString().slice(0, 7)}.pdf`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    },
+    onSuccess: () => toast.success('PDF downloaded'),
+    onError: (error) => handleApiError(error),
+  });
+}

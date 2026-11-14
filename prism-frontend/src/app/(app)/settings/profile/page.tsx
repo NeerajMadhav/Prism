@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { PageHeader } from '@/components/common/PageHeader';
 import { useAuthStore } from '@/lib/store/authStore';

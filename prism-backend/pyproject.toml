@@ -26,6 +26,7 @@ dependencies = [
   "azure-mgmt-costmanagement>=4.0",
   "google-cloud-bigquery>=3.20",
   "python-multipart>=0.0.9",
+  "xhtml2pdf>=0.2.16",
 ]
 
 [project.optional-dependencies]

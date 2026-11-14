@@ -1,16 +1,20 @@
-"""Monthly report configuration routes."""
+"""Monthly report configuration, preview, and PDF download routes."""
 
 from datetime import UTC, datetime
 
 import asyncpg
 from fastapi import APIRouter, Depends
+from fastapi.responses import HTMLResponse, Response
 from pydantic import BaseModel, Field
 
 from src.config.database import get_db
 from src.middleware.org_scope import get_org_access
 from src.middleware.rbac import require_role
+from src.services.pdf_service import html_to_pdf
+from src.services.report_service import ReportService
 from src.types.models import UserContext
 from src.utils.date_utils import next_month_start
+from src.utils.errors import AppError
 from src.workers.reports_worker import send_report
 
 router = APIRouter(prefix="/v1/orgs/{org_id}/reports", tags=["reports"])
@@ -100,6 +104,52 @@ async def update_report_config(
         body.include_unit_economics,
     )
     return _serialize(row)  # type: ignore[arg-type]
+
+
+@router.get("/preview")
+async def preview_report(
+    org: dict = Depends(get_org_access),
+    _: UserContext = Depends(require_role("viewer")),
+    db: asyncpg.Connection = Depends(get_db),
+) -> dict:
+    built = await ReportService.build_html(db, org["id"])
+    return {
+        "month": built["month"],
+        "month_label": built["month_label"],
+        "org_name": built["org_name"],
+        "total_usd": built["total_usd"],
+        "html": built["html"],
+        "text": built["text"],
+    }
+
+
+@router.get("/preview.html", response_class=HTMLResponse)
+async def preview_report_html(
+    org: dict = Depends(get_org_access),
+    _: UserContext = Depends(require_role("viewer")),
+    db: asyncpg.Connection = Depends(get_db),
+) -> HTMLResponse:
+    built = await ReportService.build_html(db, org["id"])
+    return HTMLResponse(content=built["html"])
+
+
+@router.get("/download.pdf")
+async def download_report_pdf(
+    org: dict = Depends(get_org_access),
+    _: UserContext = Depends(require_role("viewer")),
+    db: asyncpg.Connection = Depends(get_db),
+) -> Response:
+    built = await ReportService.build_html(db, org["id"])
+    try:
+        pdf = html_to_pdf(built["html"])
+    except RuntimeError as exc:
+        raise AppError(str(exc), status_code=503, code="pdf_unavailable") from exc
+    filename = f"prism-report-{built['month']}.pdf"
+    return Response(
+        content=pdf,
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 @router.post("/send-now")

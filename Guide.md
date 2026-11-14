@@ -152,7 +152,23 @@ JWT_REFRESH_SECRET=change-me-refresh-secret-min-32-chars!
 ENCRYPTION_KEY=0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef
 PRISM_INTERNAL_SECRET=change-me-internal-secret-not-jwt
 FRONTEND_URL=http://localhost:3000
+# Optional — Microsoft Entra login (Office 365)
+MICROSOFT_CLIENT_ID=
+MICROSOFT_CLIENT_SECRET=
+MICROSOFT_TENANT_ID=common
+MICROSOFT_REDIRECT_URI=http://127.0.0.1:8000/v1/auth/microsoft/callback
+# Preferred outbound email (Microsoft Graph). Falls back to AWS SES when unset.
+MS_GRAPH_TENANT_ID=
+MS_GRAPH_CLIENT_ID=
+MS_GRAPH_CLIENT_SECRET=
+MS_GRAPH_SENDER=
 ```
+
+Notes:
+
+- Multiple cloud accounts of the same provider are supported (different AWS account IDs / Azure subscriptions / GCP projects).
+- Reports are HTML in-app; **Download PDF** uses `/reports/download.pdf`. Email uses the same HTML (and attaches PDF when Graph is configured).
+- Clipchamp is not used for mail — configure **Microsoft Graph** (or SES fallback).
 
 Install Python package (editable + dev tools):
 

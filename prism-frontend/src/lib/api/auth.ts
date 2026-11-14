@@ -200,6 +200,17 @@ export function startGoogleOAuth(redirect = false): string {
   return url;
 }
 
+/** Returns the Microsoft Entra OAuth URL (optionally redirects the browser). */
+export function startMicrosoftOAuth(redirect = false): string {
+  const url = `${API_BASE}/v1/auth/microsoft`;
+  if (redirect && typeof window !== 'undefined') {
+    // External IdP URL (backend), not an in-app Next.js route.
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- leaves the app for Microsoft OAuth
+    window.location.href = url;
+  }
+  return url;
+}
+
 /** Exchanges an OAuth code for tokens. */
 export async function exchangeOAuthCode(
   body: OAuthExchangeRequest,
@@ -228,6 +239,7 @@ export const authApi = {
   forgotPassword,
   resetPassword,
   startGoogleOAuth,
+  startMicrosoftOAuth,
   exchangeOAuthCode,
   fetchOrgForMe,
 };

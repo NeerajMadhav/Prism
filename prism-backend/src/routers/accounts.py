@@ -48,12 +48,15 @@ def _serialize_account(row: asyncpg.Record) -> dict:
 
 
 def _provider_account_id(provider: str, credentials: dict) -> str:
-    if provider == "aws":
-        return extract_aws_account_id(credentials["role_arn"])
-    if provider == "azure":
-        return str(credentials["subscription_id"])
-    if provider == "gcp":
-        return str(credentials["project_id"])
+    try:
+        if provider == "aws":
+            return extract_aws_account_id(credentials["role_arn"])
+        if provider == "azure":
+            return str(credentials["subscription_id"])
+        if provider == "gcp":
+            return str(credentials["project_id"])
+    except (ValueError, KeyError, TypeError) as exc:
+        raise AppError(str(exc) or "Invalid cloud credentials", status_code=400) from exc
     raise AppError("Unsupported provider", status_code=400)
 
 
@@ -121,7 +124,12 @@ async def create_account(
         cloud_account_id,
     )
     if dup:
-        raise AppError("Cloud account already connected", status_code=409, code="conflict")
+        raise AppError(
+            "This cloud account ID is already connected. "
+            "You can add another account of the same provider with a different account ID.",
+            status_code=409,
+            code="conflict",
+        )
 
     group_id = await _ensure_account_group(db, org["id"], body.provider, body.scope)
     enc = aes_encrypt(json.dumps(body.credentials))

@@ -36,6 +36,16 @@ class Settings(BaseSettings):
     google_client_secret: str = Field(default="", alias="GOOGLE_CLIENT_SECRET")
     google_redirect_uri: str = Field(default="", alias="GOOGLE_REDIRECT_URI")
 
+    microsoft_client_id: str = Field(default="", alias="MICROSOFT_CLIENT_ID")
+    microsoft_client_secret: str = Field(default="", alias="MICROSOFT_CLIENT_SECRET")
+    microsoft_tenant_id: str = Field(default="common", alias="MICROSOFT_TENANT_ID")
+    microsoft_redirect_uri: str = Field(default="", alias="MICROSOFT_REDIRECT_URI")
+
+    ms_graph_tenant_id: str = Field(default="", alias="MS_GRAPH_TENANT_ID")
+    ms_graph_client_id: str = Field(default="", alias="MS_GRAPH_CLIENT_ID")
+    ms_graph_client_secret: str = Field(default="", alias="MS_GRAPH_CLIENT_SECRET")
+    ms_graph_sender: str = Field(default="", alias="MS_GRAPH_SENDER")
+
     aws_ses_region: str = Field(default="us-east-1", alias="AWS_SES_REGION")
     aws_ses_from: str = Field(default="noreply@prism.io", alias="AWS_SES_FROM")
     aws_access_key_id: str = Field(default="", alias="AWS_ACCESS_KEY_ID")

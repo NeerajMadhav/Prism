@@ -1,4 +1,4 @@
-﻿'use client';
+'use client';
 
 import { ErrorState } from '@/components/common/ErrorState';
 import { LoadingSkeleton } from '@/components/common/LoadingSkeleton';

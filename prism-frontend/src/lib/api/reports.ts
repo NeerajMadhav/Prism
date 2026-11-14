@@ -3,6 +3,7 @@
 import { apiClient } from '@/lib/api/client';
 import type {
   ReportConfig,
+  ReportPreview,
   SendReportNowResponse,
   UpdateReportConfig,
 } from '@/types/reports';
@@ -19,6 +20,20 @@ export async function update(
   body: UpdateReportConfig,
 ): Promise<ReportConfig> {
   const { data } = await apiClient.put<ReportConfig>(`/orgs/${orgId}/reports`, body);
+  return data;
+}
+
+/** Builds a professional HTML preview for the current month. */
+export async function preview(orgId: string): Promise<ReportPreview> {
+  const { data } = await apiClient.get<ReportPreview>(`/orgs/${orgId}/reports/preview`);
+  return data;
+}
+
+/** Downloads the current monthly report as a PDF blob. */
+export async function downloadPdf(orgId: string): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>(`/orgs/${orgId}/reports/download.pdf`, {
+    responseType: 'blob',
+  });
   return data;
 }
 

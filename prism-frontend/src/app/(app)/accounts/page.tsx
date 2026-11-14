@@ -60,12 +60,15 @@ export default function AccountsPage() {
                   >
                     {account.name}
                   </Link>
-                  <p className="text-xs uppercase text-muted-foreground">{account.provider}</p>
+                  <p className="text-xs uppercase text-muted-foreground">
+                    {account.provider} · {account.provider_account_id}
+                  </p>
                 </div>
                 <span className="rounded-full bg-muted px-2 py-0.5 text-xs">{account.last_sync_status}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Records: {account.records_synced?.toLocaleString?.() ?? '—'}
+                You can connect multiple {account.provider.toUpperCase()} accounts with different
+                cloud IDs.
               </p>
               <RoleGate minRole="admin">
                 <Button
